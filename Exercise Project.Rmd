@@ -1,0 +1,138 @@
+---
+title: "Machine Learning Project"
+author: "Brent Lockee"
+date: "October 25, 2014"
+output: html_document
+---
+```{r, echo=FALSE}
+library(caret)
+library(ggplot2)
+```
+
+This is the class project for the machine learning course in Coursera's 
+data science specialization.
+
+## Abstract ##
+
+Using data movement data from the weight lifting exercises dataset, it is
+possible to build a random forest model that predicts with approximately
+99% accuracy whether a participant is executing a correct dumbell lift
+or one of four common incorrect methods of lifting. The original researchers
+used summary statistics to build a model that was less accurate, 
+approximately 80% accuracy, in predicting which lifting method was being 
+performed. This paper details the analysis performed to create the
+random forest model.
+
+## Data ##
+
+A more complete summary of the data collection methods can be found here:
+http://groupware.les.inf.puc-rio.br/har
+
+The training dataset can be downloaded here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test set is available here:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The following analysis assumes the the pml-training.csv and
+pml-testing.csv files are in the working directory.
+
+
+```{r}
+set.seed(1985)
+testing <- read.csv("pml-testing.csv")
+training <- read.csv("pml-training.csv")
+dim(training)
+dim(testing)
+```
+
+The training data includes rows that represent data collected in an instant
+and other rows containing summary statistics for the interval of an exercise.
+The new_window variable 'yes' that a row contains summary data.
+These summary rows must be excluded because the testing data set only contains
+entries representing a single measurement. In addition, both sets of data
+contain a large number of NA values. Lastly, the training set
+should not include any variables not present in the test set.
+
+```{r}
+training <- training[training$new_window == 'no', ]
+training <- training[, colSums(is.na(training)) == 0]
+testing <- testing[, colSums(is.na(testing)) == 0]
+training <- subset(training, select = names(training) %in% names(testing) |
+                           names(training) == 'classe')
+dim(training)
+dim(testing)
+```
+
+In order to cross-validate results once the models are built, the training
+set will be split into a training and test set of its own. I also created
+a smaller subset of the training set to use when trying models. With
+nearly 20,000 observations, the full training set requires significant
+computing power to analyze for model building.
+
+```{r}
+inTest <- createDataPartition(y=training$classe, p = 0.1, list = FALSE)
+cvtest <- training[inTest, ]
+training <- training[-inTest, ]
+inMicro <- createDataPartition(y=training$classe, p = 0.075, list = FALSE)
+micro <- training[inMicro, ]
+```
+
+## Model Building ##
+
+The first models were built on the micro dataset to insure that they showed
+promise before more resources were devoted to them.
+
+```{r}
+microMod <- train(classe~., method = 'rf', prox = TRUE, data=micro)
+microMod
+varImp(microMod)
+```
+
+The variable importance analysis reveals that the X variable is heavily
+influencing the model. Seeing this, it seems best to remove all identifying
+variables, including timestamp info. These variables are all contained within
+the first seven columns.
+
+```{r}
+micro <- micro[,-1:-7] ; training <- training[ , -1:-7]
+microMod <- train(classe~., method = 'rf', prox = TRUE, data=micro)
+microMod
+varImp(microMod)
+```
+
+That model is certainly more promising. Because of concerns over computer
+performance, I've decided to modify the typical error estimation and resampling
+of the caret package.
+
+```{r}
+control <- trainControl(method = 'oob', number = 10)
+```
+
+```{r}
+modelFit <- train(classe~., data = training, trControl = control, 
+                  prox = FALSE, method = 'rf')
+```
+
+```{r, echo=FALSE}
+modelFit
+```
+With an accuracy of .995 and a Kappa value of .994, the random forest model
+looks to have a prediction accuracy of over 99%.
+To cross-validate with our training test set.
+```{r}
+pred <- predict(modelFit, cvtest)
+table(pred, cvtest$classe)
+```
+This evaluates to an overall error rate of 0.00572. This is certainly far
+superior to the approximately 20% error rate seen in the original study
+when summary statistics were used.
+
+## Conclusion ##
+
+It's incredible to think that a moment's worth of measurement could be used to
+accurately predict the type of overall movement that was being performed.
+The result is certainly counterintuitive. It would seem to indicate that
+each class of movement has a unique pattern of movement with little overlap.
+It may look like all bicep curls are created equal, but these results indicate
+that each class of curl follows a nearly completely unique track of movements.
